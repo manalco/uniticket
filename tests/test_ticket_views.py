@@ -72,7 +72,10 @@ def test_ticket_create_persists_with_current_user(client, usuario):
 
 @pytest.mark.django_db
 def test_ticket_create_requires_login(client):
-    response = client.post(reverse("ticket_create"), {"location": "x", "equipment_id": "y", "description": "z"})
+    response = client.post(
+        reverse("ticket_create"),
+        {"location": "x", "equipment_id": "y", "description": "z"},
+    )
     assert response.status_code == 302
     assert reverse("login") in response.url
 
