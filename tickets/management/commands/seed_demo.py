@@ -1,8 +1,17 @@
 """Carga datos de demostración para UniTicket.
 
-Uso: python manage.py seed_demo
-Idempotente: vuelve a correrlo no duplica usuarios ni tickets.
+Uso:
+    python manage.py seed_demo
+
+Credenciales y emails se leen de variables de entorno (inyectadas por
+Jenkins en producción). Si no están definidas, usa defaults inseguros
+para desarrollo local.
+
+Idempotente: get_or_create por username. Passwords y emails se
+re-aplican en cada corrida para permitir rotación desde Jenkins.
 """
+
+import os
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
@@ -14,9 +23,15 @@ from tickets.models import Ticket
 User = get_user_model()
 
 
-DEMO_USERS = [
-    ("usuario_demo", "demo1234", "usuario@demo.local", "usuario"),
-    ("tecnico_demo", "demo1234", "tecnico@demo.local", "tecnico"),
+def _env(name: str, default: str) -> str:
+    return os.environ.get(name, default)
+
+
+# Esquema: (rol_logico, env_prefix, default_username, default_email)
+DEMO_USER_SPECS = [
+    ("usuario", "SEED_USUARIO", "usuario_demo", "usuario@demo.local"),
+    ("tecnico", "SEED_TECNICO", "tecnico_demo", "tecnico@demo.local"),
+    ("superuser", "SEED_SUPER", "super_demo", "super@demo.local"),
 ]
 
 DEMO_TICKETS = [
@@ -43,31 +58,48 @@ DEMO_TICKETS = [
 
 
 class Command(BaseCommand):
-    help = "Crea grupos, usuarios demo y tickets de muestra."
+    help = "Crea/actualiza usuarios demo desde env vars y tickets de muestra."
 
     @transaction.atomic
     def handle(self, *args, **options):
         usuario_group, _ = Group.objects.get_or_create(name="usuario")
         tecnico_group, _ = Group.objects.get_or_create(name="tecnico")
-        groups_by_name = {"usuario": usuario_group, "tecnico": tecnico_group}
 
-        users = {}
-        for username, password, email, role in DEMO_USERS:
+        created_users = {}
+
+        for role, prefix, default_user, default_email in DEMO_USER_SPECS:
+            username = _env(f"{prefix}_USERNAME", default_user)
+            password = _env(f"{prefix}_PASSWORD", "demo1234")
+            email = _env(f"{prefix}_EMAIL", default_email)
+
             user, created = User.objects.get_or_create(
                 username=username,
                 defaults={"email": email},
             )
-            if created:
-                user.set_password(password)
-                user.save()
-            user.groups.add(groups_by_name[role])
-            users[username] = user
+            user.email = email
+            user.set_password(password)
+
+            if role == "superuser":
+                user.is_superuser = True
+                user.is_staff = True
+                user.groups.clear()
+            elif role == "usuario":
+                user.is_superuser = False
+                user.is_staff = False
+                user.groups.set([usuario_group])
+            elif role == "tecnico":
+                user.is_superuser = False
+                user.is_staff = False
+                user.groups.set([tecnico_group])
+
+            user.save()
+            created_users[role] = user
             self.stdout.write(
-                f"{'creado' if created else 'existente'}: {username} ({role})"
+                f"{'creado' if created else 'actualizado'}: {username} ({role})"
             )
 
-        author = users["usuario_demo"]
-        tecnico = users["tecnico_demo"]
+        author = created_users["usuario"]
+        tecnico = created_users["tecnico"]
         for spec in DEMO_TICKETS:
             ticket, created = Ticket.objects.get_or_create(
                 equipment_id=spec["equipment_id"],

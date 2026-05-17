@@ -1,13 +1,22 @@
 from django.contrib import messages
-from django.contrib.auth import login
+from django.contrib.auth import get_user_model, login
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.models import Group
 from django.core.paginator import Paginator
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from .forms import SignUpForm, TicketCreateForm, TicketUpdateForm
 from .models import Ticket
-from .permissions import is_tecnico
+from .permissions import (
+    GROUP_TECNICO,
+    GROUP_USUARIO,
+    MANAGED_ROLES,
+    is_tecnico,
+    superuser_required,
+)
+
+User = get_user_model()
 
 
 def home(request):
@@ -105,3 +114,40 @@ def ticket_detail(request, pk):
         "is_tecnico": user_is_tecnico,
     }
     return render(request, "tickets/ticket_detail.html", context)
+
+
+@superuser_required
+def manage_users(request):
+    """Gestión de roles. Solo superusuarios pueden cambiar roles ajenos."""
+    if request.method == "POST":
+        target = get_object_or_404(User, pk=request.POST.get("user_id"))
+        new_role = request.POST.get("role", "")
+
+        if target.is_superuser:
+            messages.error(request, "No se puede modificar el rol de otro superusuario.")
+        elif target.pk == request.user.pk:
+            messages.error(request, "No puedes cambiar tu propio rol.")
+        elif new_role not in MANAGED_ROLES:
+            messages.error(request, "Rol inválido.")
+        else:
+            usuario_group, _ = Group.objects.get_or_create(name=GROUP_USUARIO)
+            tecnico_group, _ = Group.objects.get_or_create(name=GROUP_TECNICO)
+            target.groups.remove(usuario_group, tecnico_group)
+            new_group = usuario_group if new_role == GROUP_USUARIO else tecnico_group
+            target.groups.add(new_group)
+            messages.success(
+                request, f"Rol de {target.username} actualizado a {new_role}."
+            )
+
+        return redirect("manage_users")
+
+    users = (
+        User.objects.exclude(is_superuser=True)
+        .order_by("username")
+        .prefetch_related("groups")
+    )
+    return render(
+        request,
+        "tickets/manage_users.html",
+        {"users": users, "managed_roles": MANAGED_ROLES},
+    )
