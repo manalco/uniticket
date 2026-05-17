@@ -4,38 +4,30 @@ from django.contrib.auth.forms import UserCreationForm
 from django.contrib.auth.models import Group
 
 from .models import Ticket
+from .permissions import GROUP_USUARIO
 
 User = get_user_model()
 
 
-ROLE_USUARIO = "usuario"
-ROLE_TECNICO = "tecnico"
-ROLE_CHOICES = [
-    (ROLE_USUARIO, "Usuario estándar (reportar fallas)"),
-    (ROLE_TECNICO, "Técnico (resolver tickets)"),
-]
-
-
 class SignUpForm(UserCreationForm):
+    """Self-service signup. Solo crea usuarios con rol 'usuario'.
+
+    Roles tecnico y superusuario solo los asigna un superusuario via
+    /manage/users/ o via el Django admin.
+    """
+
     email = forms.EmailField(required=True)
-    role = forms.ChoiceField(
-        choices=ROLE_CHOICES,
-        widget=forms.RadioSelect,
-        label="Rol",
-        initial=ROLE_USUARIO,
-    )
 
     class Meta(UserCreationForm.Meta):
         model = User
-        fields = ("username", "email", "password1", "password2", "role")
+        fields = ("username", "email", "password1", "password2")
 
     def save(self, commit: bool = True):
         user = super().save(commit=False)
         user.email = self.cleaned_data["email"]
         if commit:
             user.save()
-            group_name = self.cleaned_data["role"]
-            group, _ = Group.objects.get_or_create(name=group_name)
+            group, _ = Group.objects.get_or_create(name=GROUP_USUARIO)
             user.groups.add(group)
         return user
 

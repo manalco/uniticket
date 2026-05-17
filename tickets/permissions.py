@@ -6,6 +6,7 @@ from django.core.exceptions import PermissionDenied
 
 GROUP_USUARIO = "usuario"
 GROUP_TECNICO = "tecnico"
+MANAGED_ROLES = (GROUP_USUARIO, GROUP_TECNICO)
 
 
 def is_tecnico(user) -> bool:
@@ -26,6 +27,17 @@ def tecnico_required(view_func):
     def _wrapped(request, *args, **kwargs):
         if not is_tecnico(request.user):
             raise PermissionDenied("Solo técnicos pueden ejecutar esta acción.")
+        return view_func(request, *args, **kwargs)
+
+    return _wrapped
+
+
+def superuser_required(view_func):
+    @wraps(view_func)
+    @login_required
+    def _wrapped(request, *args, **kwargs):
+        if not request.user.is_superuser:
+            raise PermissionDenied("Solo superusuarios pueden ejecutar esta acción.")
         return view_func(request, *args, **kwargs)
 
     return _wrapped
