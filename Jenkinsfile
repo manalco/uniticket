@@ -54,6 +54,42 @@ pipeline {
                 }
             }
         }
+
+        stage('Static Analysis') {
+            steps {
+                sh """
+                    docker run --rm \
+                      --workdir /app \
+                      ${IMAGE_NAME}:${IMAGE_TAG} \
+                      flake8 .
+                """
+            }
+        }
+
+        stage('Unit Tests') {
+            steps {
+                sh """
+                    rm -rf reports && mkdir -p reports
+                    docker run --rm \
+                      -v "${env.WORKSPACE}/reports":/reports \
+                      -e DJANGO_SETTINGS_MODULE=uniticket.settings \
+                      -e SECRET_KEY=ci-test-only \
+                      -e DEBUG=False \
+                      -e ALLOWED_HOSTS='*' \
+                      -e DATABASE_URL='sqlite:////tmp/test_uniticket.sqlite3' \
+                      --workdir /app \
+                      ${IMAGE_NAME}:${IMAGE_TAG} \
+                      sh -c 'coverage run -m pytest --junitxml=/reports/junit.xml -v && coverage xml -o /reports/coverage.xml && coverage report'
+                """
+            }
+            post {
+                always {
+                    junit allowEmptyResults: true, testResults: 'reports/junit.xml'
+                    archiveArtifacts artifacts: 'reports/coverage.xml,reports/junit.xml',
+                                     allowEmptyArchive: true, fingerprint: true
+                }
+            }
+        }
     }
 
     post {
