@@ -39,7 +39,10 @@ Razón: alineado a ejemplos de los documentos; arquitectura de **dos contenedore
 
 ## 4. Reglas operativas (todas las fases)
 
-- **GitFlow estricto:** `main` (producción) ← `develop` (integración) ← `feature/*`. `hotfix/*` directo a `main` solo si se justifica.
+- **GitFlow estricto:**
+  - `main` (producción) ← `release/x.y.z` (estabilización) ← `develop` (integración) ← `feature/*`.
+  - `hotfix/x.y.z+1` directo a `main` solo si se justifica (luego back-merge a `develop`).
+  - Releases: rama `release/x.y.z` se crea desde `develop`, se mergea a `main` vía PR + pipeline verde, se taggea en `main`, y se hace back-merge `main → develop`.
 - **Pull Requests obligatorios** hacia `develop` y `main`. Code review por compañero.
 - **Conventional Commits:** `feat:`, `fix:`, `chore:`, `docs:`, `test:`, `ci:`, `refactor:`, `style:`, `build:`.
 - **Pipeline rojo bloquea merge.** Nunca se mezcla un feature si el pipeline falla.
@@ -195,7 +198,9 @@ Razón: alineado a ejemplos de los documentos; arquitectura de **dos contenedore
 - Esqueleto de informe técnico en `docs/informe/`.
 
 **Cómo confirmar:**
-- Merge `develop` → `main` (vía PR aprobado y pipeline verde) dispara pipeline completo.
+- Crear `release/x.y.z` desde `develop`, abrir PR `release/x.y.z` → `main`, mergear cuando pipeline verde.
+- El merge a `main` dispara pipeline completo incluido stage Deploy.
+- Back-merge `main` → `develop` para mantener develop al día.
 - `curl http://45.55.145.98:7007/` responde con la versión actualizada.
 - `docker ps` en VPS muestra `uniticket-grupo-7-web-1` y `uniticket-grupo-7-db-1`.
 
@@ -227,7 +232,15 @@ Razón: alineado a ejemplos de los documentos; arquitectura de **dos contenedore
 2. `git checkout -b feature/<nombre>`
 3. Tests primero (TDD) → implementación → flake8 limpio.
 4. Push → PR → pipeline verde → review compañero → merge a `develop`.
-5. Cuando develop estable: PR `develop` → `main` → deploy automático.
+
+**Para release a producción (GitFlow estricto):**
+1. `git checkout develop && git pull`
+2. `git checkout -b release/x.y.z`
+3. Ajustes finales si aplica (bump version, changelog). Commits convencionales.
+4. Push `release/x.y.z` → PR a `main`.
+5. Pipeline verde → review → merge a `main`. **El merge dispara el stage Deploy.**
+6. Tag en `main`: `git tag -a vx.y.z -m "release x.y.z" && git push origin vx.y.z`.
+7. Back-merge: PR `main` → `develop` (o `git checkout develop && git merge main --no-ff` + push) para mantener develop sincronizada.
 
 **Cómo confirmar:**
 - Login con usuario estándar permite crear ticket pero no cambiar estado de otros.

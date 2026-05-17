@@ -97,27 +97,39 @@ Si la app no responde 200 en 30s, el stage falla y se imprimen los logs del cont
 - Volumen nombrado `db_data` persiste datos entre reinicios y redeploys.
 - `docker image prune -f` al final elimina capas huérfanas para no llenar disco del VPS.
 
-## 5. Política de despliegue
+## 5. Política de despliegue (GitFlow estricto)
 
 1. Feature complete -> push `feature/*` -> PR a `develop`.
 2. PR debe pasar todos los gates (build + lint + SAST + tests) -> verde.
 3. Aprobación por compañero -> merge a `develop`. Pipeline corre en `develop` sin deploy.
-4. Release: PR `develop -> main`. Mismo set de gates en el `pr-merge` build.
-5. Merge a `main` -> **stage Deploy to Staging se activa** -> despliega a `:7007`.
-6. Smoke check verifica disponibilidad.
+4. Cuando `develop` esté lista para release:
+   1. `git checkout develop && git pull`
+   2. `git checkout -b release/x.y.z`
+   3. Ajustes finales si aplica (bump version, changelog).
+   4. Push -> PR `release/x.y.z` -> `main`.
+5. Mismo set de gates en el `pr-merge` build de la release.
+6. Aprobación + merge a `main` -> **stage Deploy to Staging se activa** -> despliega a `:7007`.
+7. Smoke check verifica disponibilidad.
+8. Tag en `main`: `git tag -a vx.y.z -m "release x.y.z" && git push origin vx.y.z`.
+9. **Back-merge** `main` -> `develop` para sincronizar (commit de merge + tag history).
 
 ## 6. Rollback
 
 Si un deploy a `main` deja la app caída:
 
-1. Revert del último commit de `main`:
+1. **Opción A — Revert + redeploy:**
    ```bash
-   git checkout main
-   git revert HEAD --no-edit
-   git push origin main
+   git checkout main && git pull
+   git checkout -b hotfix/revert-broken-release
+   git revert <SHA-del-merge-commit> --no-edit -m 1
+   git push -u origin hotfix/revert-broken-release
+   # PR hotfix -> main; tras merge se redeploya version anterior
    ```
-2. El push dispara pipeline -> redeploy de la versión anterior.
-3. Si urgente y la versión anterior no funciona: rama `hotfix/<descripcion>` desde `main`, fix, PR a `main`.
+2. **Opción B — Hotfix forward:**
+   - Rama `hotfix/x.y.z+1` desde `main`.
+   - Fix + tests.
+   - PR a `main` (pipeline verde) -> merge -> deploy automatico.
+   - Back-merge `main` -> `develop`.
 
 ## 7. Tabla de problemas frecuentes
 
