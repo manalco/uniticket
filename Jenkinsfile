@@ -15,6 +15,16 @@ pipeline {
     }
 
     stages {
+        stage('Build Info') {
+            steps {
+                script {
+                    def isPR = env.CHANGE_ID ? "PR #${env.CHANGE_ID} (${env.CHANGE_BRANCH} -> ${env.CHANGE_TARGET})" : "rama ${env.BRANCH_NAME ?: 'desconocida'}"
+                    echo "Build #${env.BUILD_NUMBER} | ${isPR}"
+                    echo "Commit: ${env.GIT_COMMIT ?: 'pre-checkout'} | URL: ${env.GIT_URL ?: '-'}"
+                }
+            }
+        }
+
         stage('Checkout') {
             steps {
                 checkout scm
@@ -38,10 +48,16 @@ pipeline {
 
     post {
         success {
-            echo "Pipeline OK — imagen ${IMAGE_NAME}:${IMAGE_TAG} construida."
+            echo "Pipeline OK — imagen ${IMAGE_NAME}:${IMAGE_TAG} construida. Seguro mergear."
         }
         failure {
-            echo 'Pipeline FALLÓ — revisar console output antes de reintentar.'
+            echo 'Pipeline FALLÓ — revisar console output. NO mergear hasta verde.'
+        }
+        unstable {
+            echo 'Pipeline UNSTABLE — revisar warnings.'
+        }
+        aborted {
+            echo 'Pipeline abortado.'
         }
         always {
             sh 'docker image prune -f --filter "dangling=true" || true'
