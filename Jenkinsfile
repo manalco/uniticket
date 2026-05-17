@@ -74,15 +74,20 @@ pipeline {
 
         stage('SAST (Bandit)') {
             steps {
+                // No usar -v: en Docker-in-Docker via socket el path del workspace
+                // de Jenkins no necesariamente existe en el host del docker daemon.
+                // Patron: docker create + docker start -a + docker cp + docker rm.
                 sh """
-                    docker run --rm \
-                      -v "${env.WORKSPACE}/reports":/reports \
-                      --workdir /app \
-                      ${IMAGE_NAME}:${IMAGE_TAG} \
-                      bandit -r . \
-                        -x ./tests,./venv,./.venv,./migrations,./staticfiles,./reports,./docs,./_jenkins_reports,./.git,./.pytest_cache,./.ruff_cache \
-                        -f xml -o /reports/bandit.xml \
-                        -v
+                    set +e
+                    cid=\$(docker create --workdir /app ${IMAGE_NAME}:${IMAGE_TAG} \\
+                        bandit -r . \\
+                          -x ./tests,./venv,./.venv,./migrations,./staticfiles,./reports,./docs,./_jenkins_reports,./.git,./.pytest_cache,./.ruff_cache \\
+                          -f xml -o /tmp/bandit.xml -v)
+                    docker start -a "\$cid"
+                    rc=\$?
+                    docker cp "\$cid:/tmp/bandit.xml" reports/bandit.xml || true
+                    docker rm -f "\$cid" >/dev/null
+                    exit \$rc
                 """
             }
             post {
@@ -96,16 +101,21 @@ pipeline {
         stage('Unit Tests') {
             steps {
                 sh """
-                    docker run --rm \
-                      -v "${env.WORKSPACE}/reports":/reports \
-                      -e DJANGO_SETTINGS_MODULE=uniticket.settings \
-                      -e SECRET_KEY=ci-test-only \
-                      -e DEBUG=False \
-                      -e ALLOWED_HOSTS='*' \
-                      -e DATABASE_URL='sqlite:////tmp/test_uniticket.sqlite3' \
-                      --workdir /app \
-                      ${IMAGE_NAME}:${IMAGE_TAG} \
-                      sh -c 'coverage run -m pytest --junitxml=/reports/junit.xml -v && coverage xml -o /reports/coverage.xml && coverage report'
+                    set +e
+                    cid=\$(docker create \\
+                        -e DJANGO_SETTINGS_MODULE=uniticket.settings \\
+                        -e SECRET_KEY=ci-test-only \\
+                        -e DEBUG=False \\
+                        -e ALLOWED_HOSTS='*' \\
+                        -e DATABASE_URL='sqlite:////tmp/test_uniticket.sqlite3' \\
+                        --workdir /app ${IMAGE_NAME}:${IMAGE_TAG} \\
+                        sh -c 'coverage run -m pytest --junitxml=/tmp/junit.xml -v && coverage xml -o /tmp/coverage.xml && coverage report')
+                    docker start -a "\$cid"
+                    rc=\$?
+                    docker cp "\$cid:/tmp/junit.xml" reports/junit.xml || true
+                    docker cp "\$cid:/tmp/coverage.xml" reports/coverage.xml || true
+                    docker rm -f "\$cid" >/dev/null
+                    exit \$rc
                 """
             }
             post {
