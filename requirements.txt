@@ -4,3 +4,10 @@ gunicorn==23.0.0
 dj-database-url==2.3.0
 whitenoise==6.8.2
 python-dotenv==1.0.1
+
+# Dev / CI
+pytest==8.3.4
+pytest-django==4.9.0
+coverage==7.6.10
+flake8==7.1.1
+bandit==1.8.0

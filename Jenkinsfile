@@ -54,6 +54,68 @@ pipeline {
                 }
             }
         }
+
+        stage('Prepare Reports') {
+            steps {
+                sh 'rm -rf reports && mkdir -p reports'
+            }
+        }
+
+        stage('Static Analysis (Flake8)') {
+            steps {
+                sh """
+                    docker run --rm \
+                      --workdir /app \
+                      ${IMAGE_NAME}:${IMAGE_TAG} \
+                      flake8 .
+                """
+            }
+        }
+
+        stage('SAST (Bandit)') {
+            steps {
+                sh """
+                    docker run --rm \
+                      -v "${env.WORKSPACE}/reports":/reports \
+                      --workdir /app \
+                      ${IMAGE_NAME}:${IMAGE_TAG} \
+                      bandit -r . \
+                        -x ./tests,./venv,./.venv,./migrations,./staticfiles,./reports,./docs,./_jenkins_reports,./.git,./.pytest_cache,./.ruff_cache \
+                        -f xml -o /reports/bandit.xml \
+                        -v
+                """
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'reports/bandit.xml',
+                                     allowEmptyArchive: true, fingerprint: true
+                }
+            }
+        }
+
+        stage('Unit Tests') {
+            steps {
+                sh """
+                    docker run --rm \
+                      -v "${env.WORKSPACE}/reports":/reports \
+                      -e DJANGO_SETTINGS_MODULE=uniticket.settings \
+                      -e SECRET_KEY=ci-test-only \
+                      -e DEBUG=False \
+                      -e ALLOWED_HOSTS='*' \
+                      -e DATABASE_URL='sqlite:////tmp/test_uniticket.sqlite3' \
+                      --workdir /app \
+                      ${IMAGE_NAME}:${IMAGE_TAG} \
+                      sh -c 'coverage run -m pytest --junitxml=/reports/junit.xml -v && coverage xml -o /reports/coverage.xml && coverage report'
+                """
+            }
+            post {
+                always {
+                    junit allowEmptyResults: true, testResults: 'reports/junit.xml'
+                    archiveArtifacts artifacts: 'reports/coverage.xml,reports/junit.xml',
+                                     allowEmptyArchive: true, fingerprint: true
+                }
+            }
+        }
     }
 
     post {

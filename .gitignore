@@ -31,6 +31,10 @@ htmlcov/
 .tox/
 coverage.xml
 junit.xml
+.ruff_cache/
+_jenkins_reports/
+reports/
+bandit.xml
 
 # IDE
 .vscode/
