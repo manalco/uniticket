@@ -19,6 +19,7 @@ services:
       - uniticket_net
 
   web:
+    image: uniticket-grupo-7:latest
     build: .
     restart: unless-stopped
     ports:
