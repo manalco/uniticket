@@ -28,14 +28,14 @@ Sistema web de gestión de incidencias técnicas para laboratorios universitario
 
 - **Backend:** Django 5 (Python 3.11)
 - **DB:** PostgreSQL 15 (contenedor)
-- **Frontend:** Django templates + Bootstrap 5 (server-rendered, evita 2do contenedor)
+- **Frontend:** Django templates + Bootstrap 5 (server-rendered, sin contenedor frontend SPA adicional; la app web y la DB sí viven en contenedores separados)
 - **Auth:** Django auth nativa + grupos (`usuario`, `tecnico`)
 - **Tests:** pytest + pytest-django + coverage.py
 - **Lint:** flake8
 - **Orquestación:** Docker Compose
 - **CI/CD:** Jenkins Declarative Pipeline (`Jenkinsfile`)
 
-Razón: alineado a ejemplos de los documentos; un solo contenedor de app; cobertura natural; CRUD simple no justifica SPA.
+Razón: alineado a ejemplos de los documentos; arquitectura de **dos contenedores como mínimo** (`web` + `db`) cumpliendo el entregable 8.2 del Proyecto de Curso; cobertura natural con pytest; CRUD simple no justifica añadir contenedor frontend SPA.
 
 ## 4. Reglas operativas (todas las fases)
 
