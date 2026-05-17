@@ -1,0 +1,17 @@
+[run]
+source = .
+branch = True
+omit =
+    */migrations/*
+    */tests/*
+    */venv/*
+    */__pycache__/*
+    manage.py
+    uniticket/asgi.py
+    uniticket/wsgi.py
+    staticfiles/*
+
+[report]
+show_missing = True
+skip_covered = False
+precision = 2
