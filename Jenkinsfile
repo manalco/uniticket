@@ -209,6 +209,32 @@ pipeline {
                         docker image prune -f || true
                     '''
                 }
+
+                // Seed de usuarios demo con credenciales inyectadas desde Jenkins
+                // (nunca quedan persistidas en el contenedor web).
+                // Espera ~3s a que gunicorn levante migrate y arranque.
+                withCredentials([
+                    string(credentialsId: 'uniticket-prod-seed-usuario-password', variable: 'SEED_USUARIO_PW'),
+                    string(credentialsId: 'uniticket-prod-seed-tecnico-password', variable: 'SEED_TECNICO_PW'),
+                    string(credentialsId: 'uniticket-prod-seed-super-password',   variable: 'SEED_SUPER_PW')
+                ]) {
+                    sh '''
+                        set -e
+                        # Espera a que web este listo (gunicorn + migrate)
+                        for i in $(seq 1 10); do
+                            if docker exec "${NAME_WEB}" python -c "import django; django.setup()" >/dev/null 2>&1; then
+                                break
+                            fi
+                            sleep 2
+                        done
+
+                        docker exec \
+                            -e SEED_USUARIO_PASSWORD="${SEED_USUARIO_PW}" \
+                            -e SEED_TECNICO_PASSWORD="${SEED_TECNICO_PW}" \
+                            -e SEED_SUPER_PASSWORD="${SEED_SUPER_PW}" \
+                            "${NAME_WEB}" python manage.py seed_demo
+                    '''
+                }
                 // Smoke check post-deploy: la app debe responder en /healthz/.
                 sh '''
                     set -e

@@ -7,7 +7,7 @@ User = get_user_model()
 
 
 @pytest.mark.django_db
-def test_signup_creates_user_in_usuario_group_by_default(client, usuario_group, tecnico_group):
+def test_signup_always_creates_user_in_usuario_group(client, usuario_group, tecnico_group):
     response = client.post(
         reverse("signup"),
         {
@@ -15,7 +15,6 @@ def test_signup_creates_user_in_usuario_group_by_default(client, usuario_group, 
             "email": "ne@uni.local",
             "password1": "Complex-pass-12345",
             "password2": "Complex-pass-12345",
-            "role": "usuario",
         },
     )
     assert response.status_code == 302
@@ -25,19 +24,29 @@ def test_signup_creates_user_in_usuario_group_by_default(client, usuario_group, 
 
 
 @pytest.mark.django_db
-def test_signup_can_register_as_tecnico(client, usuario_group, tecnico_group):
+def test_signup_form_has_no_role_field(client):
+    response = client.get(reverse("signup"))
+    assert response.status_code == 200
+    assert b"role" not in response.content
+    assert b"tecnico" not in response.content
+
+
+@pytest.mark.django_db
+def test_signup_ignores_attempted_role_in_post(client, usuario_group, tecnico_group):
+    # Aunque el atacante intente forzar role=tecnico via POST, debe quedar usuario.
     client.post(
         reverse("signup"),
         {
-            "username": "nuevo_tecnico",
-            "email": "nt@uni.local",
+            "username": "intento_tecnico",
+            "email": "x@uni.local",
             "password1": "Complex-pass-12345",
             "password2": "Complex-pass-12345",
             "role": "tecnico",
         },
     )
-    user = User.objects.get(username="nuevo_tecnico")
-    assert user.groups.filter(name="tecnico").exists()
+    user = User.objects.get(username="intento_tecnico")
+    assert not user.groups.filter(name="tecnico").exists()
+    assert user.groups.filter(name="usuario").exists()
 
 
 @pytest.mark.django_db

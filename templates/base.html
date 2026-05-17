@@ -27,6 +27,9 @@
                 {% if user.is_authenticated %}
                     <li class="nav-item"><a class="nav-link" href="{% url 'dashboard' %}">Dashboard</a></li>
                     <li class="nav-item"><a class="nav-link" href="{% url 'ticket_create' %}">Nuevo ticket</a></li>
+                    {% if user.is_superuser %}
+                        <li class="nav-item"><a class="nav-link" href="{% url 'manage_users' %}">Gestionar usuarios</a></li>
+                    {% endif %}
                 {% endif %}
             </ul>
             <ul class="navbar-nav">
@@ -34,7 +37,9 @@
                     <li class="nav-item">
                         <span class="navbar-text me-3">
                             {{ user.username }}
-                            {% if user.groups.first %}
+                            {% if user.is_superuser %}
+                                <span class="badge bg-warning text-dark ms-1">superusuario</span>
+                            {% elif user.groups.first %}
                                 <span class="badge bg-secondary ms-1">{{ user.groups.first.name }}</span>
                             {% endif %}
                         </span>
