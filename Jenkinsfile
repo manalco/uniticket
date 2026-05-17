@@ -33,7 +33,7 @@ pipeline {
                     // Build con reintento: el VPS tiene fallas intermitentes en export
                     // ("CreateDiff: mount callback failed"). Retry desbloquea sin ocultar
                     // fallos reales (segundo intento tambien debe terminar verde).
-                    retry(2) {
+                    retry(3) {
                         sh """
                             docker build \
                               -t ${IMAGE_NAME}:${IMAGE_TAG} \
