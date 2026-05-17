@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">
+        Tickets
+        {% if is_tecnico %}<span class="badge bg-info text-dark ms-2">vista técnico</span>{% endif %}
+    </h1>
+    <a class="btn btn-primary" href="{% url 'ticket_create' %}">+ Nuevo ticket</a>
+</div>
+
+<form method="get" class="row g-2 mb-3">
+    <div class="col-auto">
+        <label for="status" class="col-form-label">Filtrar:</label>
+    </div>
+    <div class="col-auto">
+        <select name="status" id="status" class="form-select" onchange="this.form.submit()">
+            <option value="">Todos los estados</option>
+            {% for value, label in status_choices %}
+                <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    {% if status_filter %}
+        <div class="col-auto">
+            <a class="btn btn-outline-secondary" href="{% url 'dashboard' %}">Limpiar</a>
+        </div>
+    {% endif %}
+</form>
+
+{% if page_obj.object_list %}
+<div class="table-responsive">
+    <table class="table table-hover bg-white shadow-sm">
+        <thead class="table-light">
+            <tr>
+                <th>#</th>
+                <th>Equipo</th>
+                <th>Ubicación</th>
+                <th>Estado</th>
+                <th>Reportado por</th>
+                <th>Creado</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for ticket in page_obj %}
+            <tr>
+                <td><strong>#{{ ticket.pk }}</strong></td>
+                <td>{{ ticket.equipment_id }}</td>
+                <td>{{ ticket.location }}</td>
+                <td><span class="badge {{ ticket.badge_class }}">{{ ticket.get_status_display }}</span></td>
+                <td>{{ ticket.created_by.username }}</td>
+                <td><small class="text-muted">{{ ticket.created_at|date:"d M Y H:i" }}</small></td>
+                <td><a class="btn btn-sm btn-outline-primary" href="{% url 'ticket_detail' ticket.pk %}">Ver</a></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% if page_obj.has_other_pages %}
+<nav>
+    <ul class="pagination justify-content-center">
+        {% if page_obj.has_previous %}
+            <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}">«</a></li>
+        {% endif %}
+        <li class="page-item active"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
+        {% if page_obj.has_next %}
+            <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}{% if status_filter %}&status={{ status_filter }}{% endif %}">»</a></li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
+
+{% else %}
+<div class="card bg-white text-center p-5 shadow-sm">
+    <p class="lead mb-3">No hay tickets que mostrar.</p>
+    <div>
+        <a class="btn btn-primary" href="{% url 'ticket_create' %}">Reportar el primero</a>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
