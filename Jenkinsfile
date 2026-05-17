@@ -55,7 +55,13 @@ pipeline {
             }
         }
 
-        stage('Static Analysis') {
+        stage('Prepare Reports') {
+            steps {
+                sh 'rm -rf reports && mkdir -p reports'
+            }
+        }
+
+        stage('Static Analysis (Flake8)') {
             steps {
                 sh """
                     docker run --rm \
@@ -66,10 +72,30 @@ pipeline {
             }
         }
 
+        stage('SAST (Bandit)') {
+            steps {
+                sh """
+                    docker run --rm \
+                      -v "${env.WORKSPACE}/reports":/reports \
+                      --workdir /app \
+                      ${IMAGE_NAME}:${IMAGE_TAG} \
+                      bandit -r . \
+                        -x ./tests,./venv,./.venv,./migrations,./staticfiles,./reports,./docs,./_jenkins_reports,./.git,./.pytest_cache,./.ruff_cache \
+                        -f xml -o /reports/bandit.xml \
+                        -v
+                """
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'reports/bandit.xml',
+                                     allowEmptyArchive: true, fingerprint: true
+                }
+            }
+        }
+
         stage('Unit Tests') {
             steps {
                 sh """
-                    rm -rf reports && mkdir -p reports
                     docker run --rm \
                       -v "${env.WORKSPACE}/reports":/reports \
                       -e DJANGO_SETTINGS_MODULE=uniticket.settings \
