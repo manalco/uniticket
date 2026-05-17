@@ -25,12 +25,22 @@ pipeline {
         stage('Build Image') {
             steps {
                 script {
-                    sh """
-                        docker build \
-                          -t ${IMAGE_NAME}:${IMAGE_TAG} \
-                          -t ${IMAGE_NAME}:latest \
-                          .
-                    """
+                    // Pre-clean: evita ingest huerfanos en containerd que rompen export.
+                    sh '''
+                        docker builder prune -f --filter "until=1h" || true
+                        docker image prune -f --filter "dangling=true" || true
+                    '''
+                    // Build con reintento: el VPS tiene fallas intermitentes en export
+                    // ("CreateDiff: mount callback failed"). Retry desbloquea sin ocultar
+                    // fallos reales (segundo intento tambien debe terminar verde).
+                    retry(2) {
+                        sh """
+                            docker build \
+                              -t ${IMAGE_NAME}:${IMAGE_TAG} \
+                              -t ${IMAGE_NAME}:latest \
+                              .
+                        """
+                    }
                 }
             }
         }
