@@ -132,46 +132,81 @@ pipeline {
                 branch 'main'
             }
             environment {
-                // Project name vía env var en vez de -p (mas compatible con
-                // distintas versiones del CLI compose en el VPS).
-                COMPOSE_PROJECT_NAME = 'uniticket-grupo-7'
+                STACK    = 'uniticket-grupo-7'
+                NET      = 'uniticket-grupo-7_net'
+                VOL_DB   = 'uniticket-grupo-7_db_data'
+                NAME_WEB = 'uniticket-grupo-7-web'
+                NAME_DB  = 'uniticket-grupo-7-db'
+                APP_PORT = '7007'
+                PG_DB    = 'uniticket_g7_prod'
+                PG_USER  = 'uniticket_g7'
             }
             steps {
                 withCredentials([
                     string(credentialsId: 'uniticket-prod-secret-key', variable: 'PROD_SECRET_KEY'),
                     string(credentialsId: 'uniticket-prod-pg-password', variable: 'PROD_PG_PASSWORD')
                 ]) {
+                    // Deploy sin compose: el agente Jenkins del grupo no tiene
+                    // compose v2 ni v1. Usamos docker run directo orquestando
+                    // red, volumen y dos contenedores. Equivalente funcional al
+                    // docker-compose.yml del repo. Cumple entregable 8.2 (>= 2
+                    // contenedores).
                     sh '''
-                        # Genera .env transitorio para compose con valores de prod.
-                        # Se borra al final del stage (no debe persistir en workspace).
-                        cat > .env <<EOF
-SECRET_KEY=${PROD_SECRET_KEY}
-DEBUG=False
-ALLOWED_HOSTS=45.55.145.98,localhost,127.0.0.1
-CSRF_TRUSTED_ORIGINS=http://45.55.145.98:7007
-POSTGRES_DB=uniticket_g7_prod
-POSTGRES_USER=uniticket_g7
-POSTGRES_PASSWORD=${PROD_PG_PASSWORD}
-EOF
-                        # Diagnostico + seleccion del binario compose
-                        # (v2 plugin moderno o v1 standalone).
-                        if docker compose version > /dev/null 2>&1; then
-                            COMPOSE="docker compose"
-                        elif docker-compose --version > /dev/null 2>&1; then
-                            COMPOSE="docker-compose"
-                        else
-                            echo "ERROR: ni 'docker compose' ni 'docker-compose' disponibles en el agente"
-                            exit 1
-                        fi
-                        echo "Usando: $COMPOSE (project=$COMPOSE_PROJECT_NAME)"
+                        set -e
 
-                        # Despliegue (Doc Apoyo 06). Project name via env var.
-                        $COMPOSE down || true
-                        $COMPOSE up -d --build
-                        docker image prune -f
+                        # 1. Cleanup contenedores previos (red y volumen se conservan).
+                        docker rm -f "${NAME_WEB}" 2>/dev/null || true
+                        docker rm -f "${NAME_DB}" 2>/dev/null || true
 
-                        # No dejar secretos en workspace de Jenkins.
-                        rm -f .env
+                        # 2. Red dedicada (idempotente).
+                        docker network inspect "${NET}" >/dev/null 2>&1 || \
+                            docker network create "${NET}"
+
+                        # 3. Volumen de datos (idempotente, persiste entre deploys).
+                        docker volume inspect "${VOL_DB}" >/dev/null 2>&1 || \
+                            docker volume create "${VOL_DB}"
+
+                        # 4. Levanta DB.
+                        docker run -d \
+                            --name "${NAME_DB}" \
+                            --network "${NET}" \
+                            --restart unless-stopped \
+                            -e POSTGRES_DB="${PG_DB}" \
+                            -e POSTGRES_USER="${PG_USER}" \
+                            -e POSTGRES_PASSWORD="${PROD_PG_PASSWORD}" \
+                            -v "${VOL_DB}":/var/lib/postgresql/data \
+                            postgres:15
+
+                        # 5. Espera DB healthy via pg_isready (max 30s).
+                        echo "Esperando Postgres healthy..."
+                        for i in $(seq 1 15); do
+                            if docker exec "${NAME_DB}" pg_isready -U "${PG_USER}" -d "${PG_DB}" >/dev/null 2>&1; then
+                                echo "DB lista tras ${i} intentos"
+                                break
+                            fi
+                            sleep 2
+                            if [ "$i" = "15" ]; then
+                                echo "DB no respondio en 30s. Logs:"
+                                docker logs "${NAME_DB}" --tail=50 || true
+                                exit 1
+                            fi
+                        done
+
+                        # 6. Levanta web (usa imagen construida en stage Build Image).
+                        docker run -d \
+                            --name "${NAME_WEB}" \
+                            --network "${NET}" \
+                            --restart unless-stopped \
+                            -p "${APP_PORT}:8000" \
+                            -e SECRET_KEY="${PROD_SECRET_KEY}" \
+                            -e DEBUG=False \
+                            -e ALLOWED_HOSTS=45.55.145.98,localhost,127.0.0.1 \
+                            -e CSRF_TRUSTED_ORIGINS=http://45.55.145.98:7007 \
+                            -e DATABASE_URL="postgresql://${PG_USER}:${PROD_PG_PASSWORD}@${NAME_DB}:5432/${PG_DB}" \
+                            "${IMAGE_NAME}:latest"
+
+                        # 7. Limpieza de imagenes huerfanas (Doc Apoyo 06).
+                        docker image prune -f || true
                     '''
                 }
                 // Smoke check post-deploy: la app debe responder en /healthz/.
@@ -179,10 +214,10 @@ EOF
                     set -e
                     for i in 1 2 3 4 5 6 7 8 9 10; do
                         if docker run --rm \
-                             --network ${COMPOSE_PROJECT_NAME}_uniticket_net \
+                             --network "${NET}" \
                              curlimages/curl:8.10.1 \
                              -fsS --max-time 5 -H "Host: 45.55.145.98" \
-                             http://web:8000/healthz/ > /dev/null 2>&1; then
+                             "http://${NAME_WEB}:8000/healthz/" > /dev/null 2>&1; then
                             echo "Smoke check OK tras intento $i"
                             exit 0
                         fi
@@ -190,22 +225,17 @@ EOF
                         sleep 3
                     done
                     echo "Smoke check FAILED tras 10 intentos. Logs del web:"
-                    if docker compose version > /dev/null 2>&1; then
-                        docker compose logs web --tail=80 || true
-                    else
-                        docker-compose logs web --tail=80 || true
-                    fi
+                    docker logs "${NAME_WEB}" --tail=80 || true
                     exit 1
                 '''
             }
             post {
                 failure {
                     sh '''
-                        if docker compose version > /dev/null 2>&1; then
-                            docker compose logs --tail=120 || true
-                        else
-                            docker-compose logs --tail=120 || true
-                        fi
+                        echo "--- logs web ---"
+                        docker logs "${NAME_WEB}" --tail=120 || true
+                        echo "--- logs db ---"
+                        docker logs "${NAME_DB}" --tail=80 || true
                     '''
                 }
             }
