@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Ticket #{{ ticket.pk }}{% endblock %}
+{% block content %}
+<a class="text-decoration-none" href="{% url 'dashboard' %}">&larr; Volver al dashboard</a>
+
+<div class="card shadow-sm mt-3">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start mb-2">
+            <h1 class="h4 mb-0">
+                Ticket #{{ ticket.pk }} — {{ ticket.equipment_id }}
+            </h1>
+            <span class="badge {{ ticket.badge_class }} fs-6">{{ ticket.get_status_display }}</span>
+        </div>
+        <p class="text-muted mb-3">
+            <small>Reportado por <strong>{{ ticket.created_by.username }}</strong> el {{ ticket.created_at|date:"d M Y H:i" }}</small>
+            {% if ticket.assigned_to %}
+                · <small>Asignado a <strong>{{ ticket.assigned_to.username }}</strong></small>
+            {% endif %}
+        </p>
+
+        <dl class="row">
+            <dt class="col-sm-3">Ubicación</dt>
+            <dd class="col-sm-9">{{ ticket.location }}</dd>
+
+            <dt class="col-sm-3">Equipo</dt>
+            <dd class="col-sm-9">{{ ticket.equipment_id }}</dd>
+
+            <dt class="col-sm-3">Descripción</dt>
+            <dd class="col-sm-9" style="white-space: pre-wrap;">{{ ticket.description }}</dd>
+
+            {% if ticket.resolution_note %}
+            <dt class="col-sm-3">Nota de resolución</dt>
+            <dd class="col-sm-9" style="white-space: pre-wrap;">{{ ticket.resolution_note }}</dd>
+            {% endif %}
+
+            {% if ticket.resolved_at %}
+            <dt class="col-sm-3">Resuelto en</dt>
+            <dd class="col-sm-9">{{ ticket.resolved_at|date:"d M Y H:i" }}</dd>
+            {% endif %}
+        </dl>
+    </div>
+</div>
+
+{% if is_tecnico and update_form %}
+<div class="card shadow-sm mt-4">
+    <div class="card-body">
+        <h2 class="h5 mb-3">Actualizar ticket</h2>
+        <form method="post">
+            {% csrf_token %}
+            <div class="mb-3">
+                <label for="{{ update_form.status.id_for_label }}" class="form-label">{{ update_form.status.label }}</label>
+                {{ update_form.status }}
+            </div>
+            <div class="mb-3">
+                <label for="{{ update_form.resolution_note.id_for_label }}" class="form-label">{{ update_form.resolution_note.label }}</label>
+                {{ update_form.resolution_note }}
+                <div class="form-text">Opcional. Requerido al marcar como "Resuelto" para dejar constancia.</div>
+            </div>
+            <button type="submit" class="btn btn-primary">Guardar cambios</button>
+        </form>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
