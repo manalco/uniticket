@@ -42,4 +42,3 @@ docker compose down -v         # borra datos
 - `hotfix/*` — urgencias (PR a `main`, justificar)
 
 Conventional Commits. **No se mezcla un feature si el pipeline está rojo.**
-# test
