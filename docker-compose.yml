@@ -1,0 +1,42 @@
+name: uniticket-grupo-7
+
+services:
+  db:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-uniticket_db}
+      POSTGRES_USER: ${POSTGRES_USER:-uniticket}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-uniticket_dev_password}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-uniticket} -d ${POSTGRES_DB:-uniticket_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - uniticket_net
+
+  web:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "7007:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SECRET_KEY: ${SECRET_KEY:-dev-insecure-key-change-in-prod}
+      DEBUG: ${DEBUG:-True}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,45.55.145.98}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-uniticket}:${POSTGRES_PASSWORD:-uniticket_dev_password}@db:5432/${POSTGRES_DB:-uniticket_db}
+    networks:
+      - uniticket_net
+
+volumes:
+  db_data:
+
+networks:
+  uniticket_net:
+    driver: bridge
