@@ -1,8 +1,4 @@
-"""Smoke tests para verificar arranque mínimo del proyecto.
-
-Cubre rutas placeholder de Fase 2 (home + healthz). Tests reales por
-funcionalidad llegan en Fase 7 junto con cada feature.
-"""
+"""Smoke tests: rutas críticas y health endpoint."""
 
 from django.urls import reverse
 
@@ -17,10 +13,9 @@ def test_healthz_returns_ok(client):
     assert response.content == b"ok"
 
 
-def test_home_renders_uniticket(client):
+def test_home_redirects(client):
     response = client.get("/")
-    assert response.status_code == 200
-    assert b"UniTicket" in response.content
+    assert response.status_code == 302
 
 
 def test_home_url_reverse():
@@ -29,3 +24,9 @@ def test_home_url_reverse():
 
 def test_healthz_url_reverse():
     assert reverse("healthz") == "/healthz/"
+
+
+def test_login_page_renders(client):
+    response = client.get(reverse("login"))
+    assert response.status_code == 200
+    assert b"UniTicket" in response.content
