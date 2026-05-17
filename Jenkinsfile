@@ -74,15 +74,20 @@ pipeline {
 
         stage('SAST (Bandit)') {
             steps {
+                // No usar -v: en Docker-in-Docker via socket el path del workspace
+                // de Jenkins no necesariamente existe en el host del docker daemon.
+                // Patron: docker create + start -a + cp + rm para extraer reportes.
                 sh """
-                    docker run --rm \
-                      -v "${env.WORKSPACE}/reports":/reports \
-                      --workdir /app \
-                      ${IMAGE_NAME}:${IMAGE_TAG} \
-                      bandit -r . \
-                        -x ./tests,./venv,./.venv,./migrations,./staticfiles,./reports,./docs,./_jenkins_reports,./.git,./.pytest_cache,./.ruff_cache \
-                        -f xml -o /reports/bandit.xml \
-                        -v
+                    set +e
+                    cid=\$(docker create --workdir /app ${IMAGE_NAME}:${IMAGE_TAG} \\
+                        bandit -r . \\
+                          -x ./tests,./venv,./.venv,./migrations,./staticfiles,./reports,./docs,./_jenkins_reports,./.git,./.pytest_cache,./.ruff_cache \\
+                          -f xml -o /tmp/bandit.xml -v)
+                    docker start -a "\$cid"
+                    rc=\$?
+                    docker cp "\$cid:/tmp/bandit.xml" reports/bandit.xml || true
+                    docker rm -f "\$cid" >/dev/null
+                    exit \$rc
                 """
             }
             post {
@@ -96,16 +101,21 @@ pipeline {
         stage('Unit Tests') {
             steps {
                 sh """
-                    docker run --rm \
-                      -v "${env.WORKSPACE}/reports":/reports \
-                      -e DJANGO_SETTINGS_MODULE=uniticket.settings \
-                      -e SECRET_KEY=ci-test-only \
-                      -e DEBUG=False \
-                      -e ALLOWED_HOSTS='*' \
-                      -e DATABASE_URL='sqlite:////tmp/test_uniticket.sqlite3' \
-                      --workdir /app \
-                      ${IMAGE_NAME}:${IMAGE_TAG} \
-                      sh -c 'coverage run -m pytest --junitxml=/reports/junit.xml -v && coverage xml -o /reports/coverage.xml && coverage report'
+                    set +e
+                    cid=\$(docker create \\
+                        -e DJANGO_SETTINGS_MODULE=uniticket.settings \\
+                        -e SECRET_KEY=ci-test-only \\
+                        -e DEBUG=False \\
+                        -e ALLOWED_HOSTS='*' \\
+                        -e DATABASE_URL='sqlite:////tmp/test_uniticket.sqlite3' \\
+                        --workdir /app ${IMAGE_NAME}:${IMAGE_TAG} \\
+                        sh -c 'coverage run -m pytest --junitxml=/tmp/junit.xml -v && coverage xml -o /tmp/coverage.xml && coverage report')
+                    docker start -a "\$cid"
+                    rc=\$?
+                    docker cp "\$cid:/tmp/junit.xml" reports/junit.xml || true
+                    docker cp "\$cid:/tmp/coverage.xml" reports/coverage.xml || true
+                    docker rm -f "\$cid" >/dev/null
+                    exit \$rc
                 """
             }
             post {
@@ -120,6 +130,11 @@ pipeline {
         stage('Deploy to Staging') {
             when {
                 branch 'main'
+            }
+            environment {
+                // Project name vía env var en vez de -p (mas compatible con
+                // distintas versiones del CLI compose en el VPS).
+                COMPOSE_PROJECT_NAME = 'uniticket-grupo-7'
             }
             steps {
                 withCredentials([
@@ -138,9 +153,21 @@ POSTGRES_DB=uniticket_g7_prod
 POSTGRES_USER=uniticket_g7
 POSTGRES_PASSWORD=${PROD_PG_PASSWORD}
 EOF
-                        # Despliegue del Documento de Apoyo 06:
-                        docker compose -p uniticket-grupo-7 down || true
-                        docker compose -p uniticket-grupo-7 up -d --build
+                        # Diagnostico + seleccion del binario compose
+                        # (v2 plugin moderno o v1 standalone).
+                        if docker compose version > /dev/null 2>&1; then
+                            COMPOSE="docker compose"
+                        elif docker-compose --version > /dev/null 2>&1; then
+                            COMPOSE="docker-compose"
+                        else
+                            echo "ERROR: ni 'docker compose' ni 'docker-compose' disponibles en el agente"
+                            exit 1
+                        fi
+                        echo "Usando: $COMPOSE (project=$COMPOSE_PROJECT_NAME)"
+
+                        # Despliegue (Doc Apoyo 06). Project name via env var.
+                        $COMPOSE down || true
+                        $COMPOSE up -d --build
                         docker image prune -f
 
                         # No dejar secretos en workspace de Jenkins.
@@ -152,7 +179,7 @@ EOF
                     set -e
                     for i in 1 2 3 4 5 6 7 8 9 10; do
                         if docker run --rm \
-                             --network uniticket-grupo-7_uniticket_net \
+                             --network ${COMPOSE_PROJECT_NAME}_uniticket_net \
                              curlimages/curl:8.10.1 \
                              -fsS --max-time 5 -H "Host: 45.55.145.98" \
                              http://web:8000/healthz/ > /dev/null 2>&1; then
@@ -162,14 +189,24 @@ EOF
                         echo "Smoke intento $i fallo, esperando..."
                         sleep 3
                     done
-                    echo "Smoke check FAILED tras 10 intentos. Logs:"
-                    docker compose -p uniticket-grupo-7 logs web --tail=80 || true
+                    echo "Smoke check FAILED tras 10 intentos. Logs del web:"
+                    if docker compose version > /dev/null 2>&1; then
+                        docker compose logs web --tail=80 || true
+                    else
+                        docker-compose logs web --tail=80 || true
+                    fi
                     exit 1
                 '''
             }
             post {
                 failure {
-                    sh 'docker compose -p uniticket-grupo-7 logs --tail=120 || true'
+                    sh '''
+                        if docker compose version > /dev/null 2>&1; then
+                            docker compose logs --tail=120 || true
+                        else
+                            docker-compose logs --tail=120 || true
+                        fi
+                    '''
                 }
             }
         }
