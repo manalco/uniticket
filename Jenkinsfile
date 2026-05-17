@@ -116,6 +116,63 @@ pipeline {
                 }
             }
         }
+
+        stage('Deploy to Staging') {
+            when {
+                branch 'main'
+            }
+            steps {
+                withCredentials([
+                    string(credentialsId: 'uniticket-prod-secret-key', variable: 'PROD_SECRET_KEY'),
+                    string(credentialsId: 'uniticket-prod-pg-password', variable: 'PROD_PG_PASSWORD')
+                ]) {
+                    sh '''
+                        # Genera .env transitorio para compose con valores de prod.
+                        # Se borra al final del stage (no debe persistir en workspace).
+                        cat > .env <<EOF
+SECRET_KEY=${PROD_SECRET_KEY}
+DEBUG=False
+ALLOWED_HOSTS=45.55.145.98,localhost,127.0.0.1
+CSRF_TRUSTED_ORIGINS=http://45.55.145.98:7007
+POSTGRES_DB=uniticket_g7_prod
+POSTGRES_USER=uniticket_g7
+POSTGRES_PASSWORD=${PROD_PG_PASSWORD}
+EOF
+                        # Despliegue del Documento de Apoyo 06:
+                        docker compose -p uniticket-grupo-7 down || true
+                        docker compose -p uniticket-grupo-7 up -d --build
+                        docker image prune -f
+
+                        # No dejar secretos en workspace de Jenkins.
+                        rm -f .env
+                    '''
+                }
+                // Smoke check post-deploy: la app debe responder en /healthz/.
+                sh '''
+                    set -e
+                    for i in 1 2 3 4 5 6 7 8 9 10; do
+                        if docker run --rm \
+                             --network uniticket-grupo-7_uniticket_net \
+                             curlimages/curl:8.10.1 \
+                             -fsS --max-time 5 -H "Host: 45.55.145.98" \
+                             http://web:8000/healthz/ > /dev/null 2>&1; then
+                            echo "Smoke check OK tras intento $i"
+                            exit 0
+                        fi
+                        echo "Smoke intento $i fallo, esperando..."
+                        sleep 3
+                    done
+                    echo "Smoke check FAILED tras 10 intentos. Logs:"
+                    docker compose -p uniticket-grupo-7 logs web --tail=80 || true
+                    exit 1
+                '''
+            }
+            post {
+                failure {
+                    sh 'docker compose -p uniticket-grupo-7 logs --tail=120 || true'
+                }
+            }
+        }
     }
 
     post {
