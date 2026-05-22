@@ -31,6 +31,7 @@ services:
       SECRET_KEY: ${SECRET_KEY:-dev-insecure-key-change-in-prod}
       DEBUG: ${DEBUG:-True}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,45.55.145.98}
+      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-http://localhost:7007,http://127.0.0.1:7007,http://45.55.145.98:7007}
       DATABASE_URL: postgresql://${POSTGRES_USER:-uniticket}:${POSTGRES_PASSWORD:-uniticket_dev_password}@db:5432/${POSTGRES_DB:-uniticket_db}
     networks:
       - uniticket_net
