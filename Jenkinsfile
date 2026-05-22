@@ -132,87 +132,41 @@ pipeline {
                 branch 'main'
             }
             environment {
-                STACK    = 'uniticket-grupo-7'
-                NET      = 'uniticket-grupo-7_net'
-                VOL_DB   = 'uniticket-grupo-7_db_data'
-                NAME_WEB = 'uniticket-grupo-7-web'
-                NAME_DB  = 'uniticket-grupo-7-db'
-                APP_PORT = '7007'
-                PG_DB    = 'uniticket_g7_prod'
-                PG_USER  = 'uniticket_g7'
+                NET                  = "${COMPOSE_PROJECT}_uniticket_net"
+                PG_DB                = 'uniticket_g7_prod'
+                PG_USER              = 'uniticket_g7'
+                ALLOWED_HOSTS        = '45.55.145.98,localhost,127.0.0.1'
+                CSRF_TRUSTED_ORIGINS = 'http://45.55.145.98:7007'
+                DEBUG                = 'False'
             }
             steps {
                 withCredentials([
                     string(credentialsId: 'uniticket-prod-secret-key', variable: 'PROD_SECRET_KEY'),
                     string(credentialsId: 'uniticket-prod-pg-password', variable: 'PROD_PG_PASSWORD')
                 ]) {
-                    // Deploy sin compose: el agente Jenkins del grupo no tiene
-                    // compose v2 ni v1. Usamos docker run directo orquestando
-                    // red, volumen y dos contenedores. Equivalente funcional al
-                    // docker-compose.yml del repo. Cumple entregable 8.2 (>= 2
-                    // contenedores).
+                    // Deploy via docker compose (Doc Apoyo 06).
+                    // Variables se inyectan a compose como env del proceso sh.
                     sh '''
                         set -e
 
-                        # 1. Cleanup contenedores previos (red y volumen se conservan).
-                        docker rm -f "${NAME_WEB}" 2>/dev/null || true
-                        docker rm -f "${NAME_DB}" 2>/dev/null || true
+                        export SECRET_KEY="${PROD_SECRET_KEY}"
+                        export POSTGRES_DB="${PG_DB}"
+                        export POSTGRES_USER="${PG_USER}"
+                        export POSTGRES_PASSWORD="${PROD_PG_PASSWORD}"
 
-                        # 2. Red dedicada (idempotente).
-                        docker network inspect "${NET}" >/dev/null 2>&1 || \
-                            docker network create "${NET}"
+                        # Down idempotente del stack anterior. Volumen db_data persiste.
+                        docker compose -p "${COMPOSE_PROJECT}" down --remove-orphans || true
 
-                        # 3. Volumen de datos (idempotente, persiste entre deploys).
-                        docker volume inspect "${VOL_DB}" >/dev/null 2>&1 || \
-                            docker volume create "${VOL_DB}"
+                        # Up rebuild + detached.
+                        docker compose -p "${COMPOSE_PROJECT}" up -d --build
 
-                        # 4. Levanta DB.
-                        docker run -d \
-                            --name "${NAME_DB}" \
-                            --network "${NET}" \
-                            --restart unless-stopped \
-                            -e POSTGRES_DB="${PG_DB}" \
-                            -e POSTGRES_USER="${PG_USER}" \
-                            -e POSTGRES_PASSWORD="${PROD_PG_PASSWORD}" \
-                            -v "${VOL_DB}":/var/lib/postgresql/data \
-                            postgres:15
-
-                        # 5. Espera DB healthy via pg_isready (max 30s).
-                        echo "Esperando Postgres healthy..."
-                        for i in $(seq 1 15); do
-                            if docker exec "${NAME_DB}" pg_isready -U "${PG_USER}" -d "${PG_DB}" >/dev/null 2>&1; then
-                                echo "DB lista tras ${i} intentos"
-                                break
-                            fi
-                            sleep 2
-                            if [ "$i" = "15" ]; then
-                                echo "DB no respondio en 30s. Logs:"
-                                docker logs "${NAME_DB}" --tail=50 || true
-                                exit 1
-                            fi
-                        done
-
-                        # 6. Levanta web (usa imagen construida en stage Build Image).
-                        docker run -d \
-                            --name "${NAME_WEB}" \
-                            --network "${NET}" \
-                            --restart unless-stopped \
-                            -p "${APP_PORT}:8000" \
-                            -e SECRET_KEY="${PROD_SECRET_KEY}" \
-                            -e DEBUG=False \
-                            -e ALLOWED_HOSTS=45.55.145.98,localhost,127.0.0.1 \
-                            -e CSRF_TRUSTED_ORIGINS=http://45.55.145.98:7007 \
-                            -e DATABASE_URL="postgresql://${PG_USER}:${PROD_PG_PASSWORD}@${NAME_DB}:5432/${PG_DB}" \
-                            "${IMAGE_NAME}:latest"
-
-                        # 7. Limpieza de imagenes huerfanas (Doc Apoyo 06).
+                        # Limpieza de imagenes huerfanas (Doc Apoyo 06).
                         docker image prune -f || true
                     '''
                 }
 
                 // Seed de usuarios demo con credenciales inyectadas desde Jenkins
                 // (nunca quedan persistidas en el contenedor web).
-                // Espera ~3s a que gunicorn levante migrate y arranque.
                 withCredentials([
                     string(credentialsId: 'uniticket-prod-seed-usuario-password', variable: 'SEED_USUARIO_PW'),
                     string(credentialsId: 'uniticket-prod-seed-tecnico-password', variable: 'SEED_TECNICO_PW'),
@@ -221,18 +175,19 @@ pipeline {
                     sh '''
                         set -e
                         # Espera a que web este listo (gunicorn + migrate)
-                        for i in $(seq 1 10); do
-                            if docker exec "${NAME_WEB}" python -c "import django; django.setup()" >/dev/null 2>&1; then
+                        for i in $(seq 1 15); do
+                            if docker compose -p "${COMPOSE_PROJECT}" exec -T web \
+                                python -c "import django; django.setup()" >/dev/null 2>&1; then
                                 break
                             fi
                             sleep 2
                         done
 
-                        docker exec \
+                        docker compose -p "${COMPOSE_PROJECT}" exec -T \
                             -e SEED_USUARIO_PASSWORD="${SEED_USUARIO_PW}" \
                             -e SEED_TECNICO_PASSWORD="${SEED_TECNICO_PW}" \
                             -e SEED_SUPER_PASSWORD="${SEED_SUPER_PW}" \
-                            "${NAME_WEB}" python manage.py seed_demo
+                            web python manage.py seed_demo
                     '''
                 }
                 // Smoke check post-deploy: la app debe responder en /healthz/.
@@ -243,25 +198,23 @@ pipeline {
                              --network "${NET}" \
                              curlimages/curl:8.10.1 \
                              -fsS --max-time 5 -H "Host: 45.55.145.98" \
-                             "http://${NAME_WEB}:8000/healthz/" > /dev/null 2>&1; then
+                             "http://web:8000/healthz/" > /dev/null 2>&1; then
                             echo "Smoke check OK tras intento $i"
                             exit 0
                         fi
                         echo "Smoke intento $i fallo, esperando..."
                         sleep 3
                     done
-                    echo "Smoke check FAILED tras 10 intentos. Logs del web:"
-                    docker logs "${NAME_WEB}" --tail=80 || true
+                    echo "Smoke check FAILED tras 10 intentos. Logs del stack:"
+                    docker compose -p "${COMPOSE_PROJECT}" logs --tail=80 || true
                     exit 1
                 '''
             }
             post {
                 failure {
                     sh '''
-                        echo "--- logs web ---"
-                        docker logs "${NAME_WEB}" --tail=120 || true
-                        echo "--- logs db ---"
-                        docker logs "${NAME_DB}" --tail=80 || true
+                        echo "--- logs stack ---"
+                        docker compose -p "${COMPOSE_PROJECT}" logs --tail=120 || true
                     '''
                 }
             }
